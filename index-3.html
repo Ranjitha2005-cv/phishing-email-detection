@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phishing Email Detector</title>
+<meta name="description" content="Machine-learning phishing email detector that trains and runs entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎣</text></svg>">
+<style>
+:root{
+  --bg:#f6f7f9; --card:#ffffff; --text:#14181f; --muted:#5b6472; --line:#e3e6ec;
+  --accent:#3b5bdb; --accent-ink:#ffffff; --good:#2f9e44; --bad:#e03131; --warn:#f08c00;
+  --chip:#eef1f6; --shadow:0 1px 2px rgba(20,24,31,.06),0 4px 16px rgba(20,24,31,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f1217; --card:#171b22; --text:#e8ebf0; --muted:#9aa4b2; --line:#262c36;
+    --accent:#748ffc; --accent-ink:#0f1217; --good:#51cf66; --bad:#ff6b6b; --warn:#ffa94d;
+    --chip:#202632; --shadow:none;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:20px 16px 48px}
+header h1{font-size:1.6rem;margin:8px 0 4px;letter-spacing:-.02em}
+header p{margin:0;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-top:16px;box-shadow:var(--shadow)}
+.card h2{font-size:1.05rem;margin:0 0 12px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button,.btn{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--chip);color:var(--text);padding:10px 14px;border-radius:10px;cursor:pointer}
+button.primary,.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+button:disabled{opacity:.55;cursor:default}
+input[type=file]{display:none}
+textarea{width:100%;min-height:150px;resize:vertical;font:inherit;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+textarea:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.muted{color:var(--muted);font-size:.92rem}
+.status{margin-top:10px;font-size:.92rem;color:var(--muted)}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:6px}
+.metric{background:var(--chip);border-radius:10px;padding:12px}
+.metric b{display:block;font-size:1.5rem;letter-spacing:-.02em}
+.metric span{color:var(--muted);font-size:.85rem}
+.metric.big b{color:var(--accent)}
+.cm-wrap{overflow-x:auto;margin-top:14px}
+table.cm{border-collapse:separate;border-spacing:6px;margin:0 auto;min-width:300px}
+table.cm th{font-weight:600;font-size:.85rem;color:var(--muted);padding:4px 8px}
+table.cm td{text-align:center;padding:18px 10px;border-radius:10px;font-size:1.4rem;font-weight:700;min-width:96px}
+table.cm td small{display:block;font-size:.72rem;font-weight:500;color:var(--muted)}
+.verdict{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px}
+.badge{font-weight:700;padding:8px 14px;border-radius:999px;font-size:1.05rem}
+.badge.bad{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+.badge.good{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
+.bar{height:10px;border-radius:999px;background:var(--chip);overflow:hidden;margin-top:10px}
+.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--good),var(--warn),var(--bad));width:0;transition:width .4s}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.chip{background:var(--chip);border-radius:999px;padding:5px 11px;font-size:.85rem}
+.chip.bad{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+.chip.good{background:color-mix(in srgb,var(--good) 16%,transparent);color:var(--good)}
+h3{font-size:.95rem;margin:16px 0 0}
+.url{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82rem;word-break:break-all;background:var(--chip);border-radius:8px;padding:6px 9px;margin-top:6px}
+.url.flag{border-left:3px solid var(--bad)}
+footer{margin-top:24px;color:var(--muted);font-size:.85rem}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🎣 Phishing Email Detector</h1>
+    <p>A logistic-regression classifier that trains and runs entirely in your browser. Nothing is uploaded.</p>
+  </header>
+
+  <section class="card">
+    <h2>1 · Train the model</h2>
+    <div class="row">
+      <button class="primary" id="btnSample">Train on sample data</button>
+      <label class="btn" for="csvFile">Upload CSV dataset</label>
+      <input type="file" id="csvFile" accept=".csv,text/csv">
+    </div>
+    <p class="muted" style="margin:10px 0 0">CSV needs a text column and a label column (e.g. <code>Email Text</code> / <code>Email Type</code>). Labels like “Phishing Email”, “spam”, 1 count as Phishing; “Safe Email”, “ham”, 0 as Safe.</p>
+    <div class="status" id="status">Starting…</div>
+  </section>
+
+  <section class="card hidden" id="results">
+    <h2>2 · Test-set results <span class="muted" id="dsInfo"></span></h2>
+    <div class="metrics" id="metrics"></div>
+    <h3>Confusion matrix</h3>
+    <div class="cm-wrap"><div id="cm"></div></div>
+    <p class="muted" id="sampleNote" style="margin-bottom:0"></p>
+  </section>
+
+  <section class="card">
+    <h2>3 · Check an email</h2>
+    <textarea id="email" placeholder="Paste the email text here, including any links…"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="btnAnalyze" disabled>Analyze</button>
+      <button id="ex1">Phishing example</button>
+      <button id="ex2">Phishing example 2</button>
+      <button id="ex3">Safe example</button>
+    </div>
+    <div id="out" class="hidden">
+      <div class="verdict">
+        <span class="badge" id="badge"></span>
+        <span class="muted" id="prob"></span>
+      </div>
+      <div class="bar"><i id="barFill"></i></div>
+      <h3>Signals detected</h3>
+      <div class="chips" id="signals"></div>
+      <div id="urlsBox"><h3>Links found</h3><div id="urls"></div></div>
+      <div id="wordsBox"><h3>Words pushing toward Phishing</h3><div class="chips" id="words"></div></div>
+    </div>
+  </section>
+
+  <footer>Educational demo. Real-world filtering needs far more data and signals (headers, sender reputation, attachments). Never rely on it as your only defence.</footer>
+</div>
+
+<script>
+// ============================ CORE (ML) ============================
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+const URL_RE=/(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+const STOP=new Set("the and for you your are with this that from have has was were will not but can our all any one out get its per via".split(" "));
+const KEYWORDS=["urgent","verify","suspended","confirm","password","account","login","sign in","click","immediately","security","update","bank","limited","expire","winner","prize","free","credit card","ssn","invoice","unusual activity","act now","locked","refund","final notice"];
+const SHORTENERS=["bit.ly","tinyurl","goo.gl","t.co","ow.ly","is.gd","buff.ly","cutt.ly"];
+const BAD_TLDS=[".xyz",".top",".tk",".ml",".click",".work",".gq",".cf",".zip",".support"];
+const HAND_NAMES=["n_urls","ip_url","shortener","at_in_url","long_url","many_dots","http_only","bad_tld","hyphen_host","keywords","exclaim","upper","digits"];
+
+function authorityOf(u){return u.replace(/^https?:\/\//i,"").split(/[\/?#]/)[0].toLowerCase();}
+
+function handFeatures(text){
+  const urls=text.match(URL_RE)||[];
+  const low=text.toLowerCase();
+  const n=Math.max(text.length,1);
+  let ip=0,sh=0,at=0,maxLen=0,maxDots=0,httpOnly=0,tld=0,hyph=0;
+  const urlInfo=[];
+  for(const u of urls){
+    const auth=authorityOf(u);
+    const host=auth.includes("@")?auth.split("@").pop():auth;
+    const flags=[];
+    if(/^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(host)){ip=1;flags.push("IP address");}
+    if(SHORTENERS.some(s=>host.includes(s))){sh=1;flags.push("URL shortener");}
+    if(auth.includes("@")){at=1;flags.push("'@' trick");}
+    if(/^http:\/\//i.test(u)){httpOnly++;flags.push("not https");}
+    if(BAD_TLDS.some(t=>host.endsWith(t))){tld=1;flags.push("suspicious TLD");}
+    if((host.match(/-/g)||[]).length>=2||host.includes("xn--")){hyph=1;flags.push("odd hostname");}
+    maxLen=Math.max(maxLen,u.length);
+    maxDots=Math.max(maxDots,host.split(".").length-1);
+    urlInfo.push({url:u,flags});
+  }
+  const kwHits=KEYWORDS.filter(k=>low.includes(k));
+  const excl=(text.match(/!/g)||[]).length;
+  let up=0,dg=0;for(let i=0;i<text.length;i++){const c=text.charCodeAt(i);if(c>=65&&c<=90)up++;else if(c>=48&&c<=57)dg++;}
+  const vec=[
+    Math.min(urls.length,5)/5, ip, sh, at, Math.min(maxLen,120)/120, Math.min(maxDots,5)/5,
+    Math.min(httpOnly,3)/3, tld, hyph, Math.min(kwHits.length,8)/8, Math.min(excl,5)/5,
+    Math.min(up/n*5,1), Math.min(dg/n*5,1)
+  ];
+  return {vec,urlInfo,kwHits,excl,ip,sh,at,tld,hyph,httpOnly,nUrls:urls.length};
+}
+
+function tokens(text){
+  const t=text.toLowerCase().replace(URL_RE," urltoken ").replace(/[^a-z\s]/g," ");
+  const w=t.split(/\s+/).filter(x=>x.length>2&&!STOP.has(x));
+  const out=w.slice();
+  for(let i=0;i<w.length-1;i++)out.push(w[i]+"_"+w[i+1]);
+  return out;
+}
+
+function fitVectorizer(docs,maxFeatures=4000){
+  const df=new Map();
+  for(const d of docs){for(const t of new Set(tokens(d)))df.set(t,(df.get(t)||0)+1);}
+  const entries=[...df.entries()].filter(e=>e[1]>=2).sort((a,b)=>b[1]-a[1]).slice(0,maxFeatures);
+  const vocab=new Map(),names=[],idf=[];
+  entries.forEach(([t,c],i)=>{vocab.set(t,i);names.push(t);idf.push(Math.log((1+docs.length)/(1+c))+1);});
+  return {vocab,names,idf};
+}
+
+function vectorize(text,vz){
+  const tf=new Map();
+  for(const t of tokens(text)){const j=vz.vocab.get(t);if(j!==undefined)tf.set(j,(tf.get(j)||0)+1);}
+  const idx=[],val=[];let norm=0;
+  for(const [j,c] of tf){const v=(1+Math.log(c))*vz.idf[j];idx.push(j);val.push(v);norm+=v*v;}
+  norm=Math.sqrt(norm)||1;
+  for(let i=0;i<val.length;i++)val[i]/=norm;
+  return {idx,val,hand:handFeatures(text).vec};
+}
+
+const sigmoid=z=>1/(1+Math.exp(-Math.max(-30,Math.min(30,z))));
+
+function score(x,m){
+  let z=m.b;
+  for(let i=0;i<x.idx.length;i++)z+=m.w[x.idx[i]]*x.val[i];
+  for(let k=0;k<x.hand.length;k++)z+=m.w[m.V+k]*x.hand[k];
+  return z;
+}
+
+function trainLR(X,y,V,epochs=40,lr0=0.4,lam=1e-4,seed=1){
+  const H=HAND_NAMES.length,w=new Float64Array(V+H);let b=0;
+  const rnd=mulberry32(seed),order=X.map((_,i)=>i);
+  for(let ep=0;ep<epochs;ep++){
+    for(let i=order.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[order[i],order[j]]=[order[j],order[i]];}
+    const lr=lr0/(1+0.1*ep);
+    for(const i of order){
+      const x=X[i],p=sigmoid(score(x,{w,b,V})),g=p-y[i];
+      for(let k=0;k<x.idx.length;k++){const j=x.idx[k];w[j]-=lr*(g*x.val[k]+lam*w[j]);}
+      for(let k=0;k<H;k++){w[V+k]-=lr*(g*x.hand[k]+lam*w[V+k]);}
+      b-=lr*g;
+    }
+  }
+  return {w,b,V};
+}
+
+function splitData(df,testFrac=0.2,seed=42){
+  const rnd=mulberry32(seed),tr=[],te=[];
+  for(const cls of [0,1]){
+    const rows=df.filter(r=>r.label===cls);
+    for(let i=rows.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[rows[i],rows[j]]=[rows[j],rows[i]];}
+    const nt=Math.round(rows.length*testFrac);
+    te.push(...rows.slice(0,nt));tr.push(...rows.slice(nt));
+  }
+  return {train:tr,test:te};
+}
+
+function trainPipeline(df){
+  const {train,test}=splitData(df);
+  const vz=fitVectorizer(train.map(r=>r.text));
+  const V=vz.names.length;
+  const Xtr=train.map(r=>vectorize(r.text,vz)),ytr=train.map(r=>r.label);
+  const m=trainLR(Xtr,ytr,V);
+  const model={...m,vz};
+  let tp=0,tn=0,fp=0,fn=0;
+  for(const r of test){
+    const p=sigmoid(score(vectorize(r.text,vz),model))>=0.5?1:0;
+    if(r.label===1&&p===1)tp++;else if(r.label===0&&p===0)tn++;else if(r.label===0&&p===1)fp++;else fn++;
+  }
+  const acc=(tp+tn)/test.length,prec=tp/(tp+fp||1),rec=tp/(tp+fn||1),f1=2*prec*rec/(prec+rec||1);
+  model.metrics={acc,prec,rec,f1,tp,tn,fp,fn,nTrain:train.length,nTest:test.length};
+  return model;
+}
+
+function analyze(text,model){
+  const x=vectorize(text,model.vz),h=handFeatures(text);
+  const p=sigmoid(score(x,model));
+  const contrib=[];
+  for(let k=0;k<x.idx.length;k++){const j=x.idx[k];contrib.push([model.vz.names[j],model.w[j]*x.val[k]]);}
+  contrib.sort((a,b)=>b[1]-a[1]);
+  const topPhish=contrib.filter(c=>c[1]>0.05).slice(0,8).map(c=>c[0].replace(/_/g," "));
+  return {p,h,topPhish};
+}
+
+// ---------- dataset helpers ----------
+function makeSample(n=600,seed=42){
+  const r=mulberry32(seed),pick=a=>a[Math.floor(r()*a.length)],ri=(a,b)=>a+Math.floor(r()*(b-a+1));
+  const brands=["PayPal","Amazon","Netflix","Apple","Microsoft","HDFC Bank","SBI","Google"];
+  const badD=["secure-{b}-verify.xyz","{b}-login.top","account-{b}.tk","{b}.support-center.click","192.168.{a}.{c}","bit.ly"];
+  const goodD=["{b}.com","www.{b}.com","company.org","university.edu","github.com"];
+  const phish=[
+    "URGENT: Your {B} account has been suspended. Verify your password immediately at {u} or it will be locked!",
+    "Dear customer, unusual activity detected on your {B} account. Click {u} to confirm your identity now.",
+    "Congratulations! You are a winner of a free prize. Claim your refund at {u} before it expires!!!",
+    "Security alert: your {B} login is limited. Update your credit card and bank details here: {u}",
+    "Final notice: invoice unpaid. Act now to avoid account closure. Sign in: {u}",
+    "Your {B} password will expire today. Click here immediately to keep your account: {u}"
+  ];
+  const safe=[
+    "Hi team, attaching the meeting notes from yesterday. The next sync is on Thursday at 3pm. Details: {u}",
+    "Your {B} order has shipped and should arrive Friday. Track it from your dashboard at {u}.",
+    "Thanks for attending the workshop! Slides and recording are available at {u}. Let me know if you have questions.",
+    "Reminder: the project review is scheduled for next Monday. Please share your updates in the doc {u}.",
+    "Hello, here is the monthly newsletter with new articles and tips. Read more at {u}.",
+    "Lunch tomorrow? I found a new place near the office. Menu is here: {u}",
+    "Your {B} password was changed successfully. If this was you, no action is needed. Help center: {u}",
+    "Receipt for your {B} account subscription this month. Manage billing anytime at {u}."
+  ];
+  const mkUrl=(domains,ph)=>{
+    const b=pick(brands).toLowerCase().replace(/ /g,"");
+    const d=pick(domains).replace("{b}",b).replace("{a}",ri(0,255)).replace("{c}",ri(0,255));
+    const scheme=ph&&r()<0.7?"http":"https";
+    let path="/";for(let i=ri(4,14);i>0;i--)path+="abcdefghijklmnopqrstuvwxyz0123456789"[ri(0,35)];
+    return scheme+"://"+d+path;
+  };
+  const rows=[];
+  for(let i=0;i<n;i++){
+    let p=pick(phish).replace("{B}",pick(brands)).replace("{u}",mkUrl(r()<0.06?goodD:badD,true));
+    if(r()<0.08)p=p.replace(URL_RE,"").replace(/\s+/g," ");
+    let s=pick(safe).replace("{B}",pick(brands)).replace("{u}",mkUrl(goodD,false));
+    if(r()<0.08)s="Urgent: please confirm your attendance. "+s;
+    rows.push({text:p,label:1},{text:s,label:0});
+  }
+  return rows;
+}
+
+function parseCSV(text){
+  const rows=[];let row=[],f="",q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){if(c==='"'){if(text[i+1]==='"'){f+='"';i++;}else q=false;}else f+=c;}
+    else if(c==='"')q=true;
+    else if(c===","){row.push(f);f="";}
+    else if(c==="\n"||c==="\r"){if(c==="\r"&&text[i+1]==="\n")i++;row.push(f);f="";if(row.length>1||row[0]!=="")rows.push(row);row=[];}
+    else f+=c;
+  }
+  if(f!==""||row.length){row.push(f);rows.push(row);}
+  return rows;
+}
+
+function csvToDataset(text){
+  const rows=parseCSV(text);
+  if(rows.length<10)throw new Error("CSV has too few rows.");
+  const head=rows[0].map(h=>h.trim().toLowerCase());
+  const ti=["email text","text","body","email","message","content"].map(k=>head.indexOf(k)).find(i=>i>=0);
+  const li=["email type","label","class","type","target"].map(k=>head.indexOf(k)).find(i=>i>=0);
+  if(ti===undefined||li===undefined)throw new Error("Couldn't find text/label columns. Headers: "+rows[0].join(", "));
+  const PH=new Set(["1","phishing","phishing email","spam","malicious","fraud"]);
+  let out=[];
+  for(let i=1;i<rows.length;i++){
+    const t=(rows[i][ti]||"").trim();if(!t)continue;
+    out.push({text:t.slice(0,3000),label:PH.has((rows[i][li]||"").trim().toLowerCase())?1:0});
+  }
+  let note="";
+  if(out.length>8000){const rnd=mulberry32(7);out.sort(()=>rnd()-0.5);out=out.slice(0,8000);note="Randomly sampled 8,000 rows for speed. ";}
+  const c1=out.filter(r=>r.label===1).length;
+  if(c1<5||out.length-c1<5)throw new Error("Need at least 5 examples of each class.");
+  return {rows:out,note};
+}
+// ============================ END CORE ============================
+
+// ============================ UI ============================
+if(typeof document!=="undefined"){
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let MODEL=null;
+
+const EX={
+  ex1:"URGENT: Your PayPal account has been suspended!\n\nWe detected unusual activity. Verify your password immediately or your account will be locked:\nhttp://192.168.14.7/paypal/verify-login\n\nAct now!!!",
+  ex2:"Dear customer, your package could not be delivered. Confirm your address and pay a small fee here: http://bit.ly/3xYzAb and enter your credit card to avoid return.",
+  ex3:"Hi Priya,\n\nHere are the notes from Tuesday's project review. The next sync is Thursday at 3pm.\nDoc: https://github.com/team/project-notes\n\nThanks,\nArjun"
+};
+for(const k of Object.keys(EX))$(k).onclick=()=>{$("email").value=EX[k];if(MODEL)runAnalyze();};
+
+function setStatus(t){$("status").textContent=t;}
+
+function trainOn(rows,label,note=""){
+  $("btnSample").disabled=true;$("btnAnalyze").disabled=true;
+  setStatus("Training… this takes a few seconds.");
+  setTimeout(()=>{
+    try{
+      MODEL=trainPipeline(rows);
+      renderResults(rows,label,note);
+      $("btnAnalyze").disabled=false;
+      setStatus("Model ready. Try the checker below.");
+    }catch(e){setStatus("Error: "+e.message);}
+    $("btnSample").disabled=false;
+  },40);
+}
+
+function renderResults(rows,label,note){
+  const m=MODEL.metrics,pc=x=>(x*100).toFixed(1)+"%";
+  $("results").classList.remove("hidden");
+  $("dsInfo").textContent="· "+label+" · "+rows.length+" emails ("+m.nTrain+" train / "+m.nTest+" test)";
+  $("metrics").innerHTML=
+    `<div class="metric big"><b>${pc(m.acc)}</b><span>Accuracy</span></div>`+
+    `<div class="metric"><b>${pc(m.prec)}</b><span>Precision</span></div>`+
+    `<div class="metric"><b>${pc(m.rec)}</b><span>Recall</span></div>`+
+    `<div class="metric"><b>${pc(m.f1)}</b><span>F1 score</span></div>`;
+  const max=Math.max(m.tp,m.tn,m.fp,m.fn,1);
+  const cell=(v,good,lab)=>`<td style="background:color-mix(in srgb,var(${good?"--good":"--bad"}) ${Math.round(12+60*v/max)}%,transparent)">${v}<small>${lab}</small></td>`;
+  $("cm").innerHTML=`<table class="cm"><tr><th></th><th>Predicted Safe</th><th>Predicted Phishing</th></tr>`+
+    `<tr><th>Actual Safe</th>${cell(m.tn,true,"true negative")}${cell(m.fp,false,"false positive")}</tr>`+
+    `<tr><th>Actual Phishing</th>${cell(m.fn,false,"false negative")}${cell(m.tp,true,"true positive")}</tr></table>`;
+  $("sampleNote").textContent=(note||"")+(label==="sample data"?"The built-in sample is small and synthetic, so scores here are optimistic. Upload a real dataset for a realistic estimate.":"");
+}
+
+function runAnalyze(){
+  const text=$("email").value.trim();
+  if(!text||!MODEL)return;
+  const {p,h,topPhish}=analyze(text,MODEL);
+  const bad=p>=0.5;
+  $("out").classList.remove("hidden");
+  const b=$("badge");b.textContent=bad?"⚠️ Phishing":"✅ Safe";b.className="badge "+(bad?"bad":"good");
+  $("prob").textContent="Phishing probability: "+(p*100).toFixed(1)+"%";
+  $("barFill").style.width=(p*100).toFixed(1)+"%";
+
+  const chips=[];
+  if(h.ip)chips.push(["Link points to a raw IP address",1]);
+  if(h.sh)chips.push(["Uses a URL shortener",1]);
+  if(h.at)chips.push(["'@' hidden in a link",1]);
+  if(h.tld)chips.push(["Suspicious domain ending",1]);
+  if(h.hyph)chips.push(["Odd hostname (many hyphens)",1]);
+  if(h.httpOnly)chips.push([h.httpOnly+" link(s) not using https",1]);
+  if(h.kwHits.length)chips.push(["Pressure/credential words: "+h.kwHits.slice(0,6).join(", "),1]);
+  if(h.excl>=2)chips.push([h.excl+" exclamation marks",1]);
+  if(h.nUrls===0)chips.push(["No links in the message",0]);
+  else if(!h.ip&&!h.sh&&!h.tld&&!h.at&&!h.httpOnly&&!h.hyph)chips.push(["Links look structurally normal",0]);
+  if(!h.kwHits.length)chips.push(["No urgency/credential keywords",0]);
+  $("signals").innerHTML=chips.map(c=>`<span class="chip ${c[1]?"bad":"good"}">${esc(c[0])}</span>`).join("");
+
+  $("urlsBox").classList.toggle("hidden",!h.urlInfo.length);
+  $("urls").innerHTML=h.urlInfo.map(u=>`<div class="url ${u.flags.length?"flag":""}">${esc(u.url)}${u.flags.length?`<br><span style="color:var(--bad)">${esc(u.flags.join(" · "))}</span>`:""}</div>`).join("");
+
+  $("wordsBox").classList.toggle("hidden",!topPhish.length);
+  $("words").innerHTML=topPhish.map(w=>`<span class="chip">${esc(w)}</span>`).join("");
+}
+
+$("btnAnalyze").onclick=runAnalyze;
+$("btnSample").onclick=()=>trainOn(makeSample(),"sample data");
+$("csvFile").onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  setStatus("Reading "+f.name+"…");
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{const {rows,note}=csvToDataset(rd.result);trainOn(rows,f.name,note);}
+    catch(err){setStatus("Error: "+err.message);}
+  };
+  rd.readAsText(f);
+  e.target.value="";
+};
+
+trainOn(makeSample(),"sample data");
+}
+</script>
+</body>
+</html>
